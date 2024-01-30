@@ -355,3 +355,105 @@ func (c *Consumer) handleConsumerMessageRouting() (err error) {
 	//当消费队列退出后继续重连
 	return fmt.Errorf("消费队列异常退出")
 }
+
+// ================================= Topic 话题模式 ================================= //
+
+// NewConsumerTopic 实例化路由模式的消费者
+func NewConsumerTopic(exchangeName string, routingKey string, messageHandler MessageConsumerHandler) *Consumer {
+	return &Consumer{
+		QueueName:          "",
+		Exchange:           exchangeName,
+		Key:                routingKey,
+		ConsumerName:       "",
+		retryConnSleepTime: 5,
+		messageHandler:     messageHandler,
+	}
+}
+
+// ConsumeMessageTopicRun 启动路由模式的消费者消息消费
+func (c *Consumer) ConsumeMessageTopicRun() {
+	for {
+		fmt.Printf("话题模式的交换机【%s】开始启动处理消息...\r\n", c.Exchange)
+
+		err := c.handleConsumerMessageTopic()
+		if err != nil {
+			fmt.Printf("异常退出，%d 秒后重新连接，错误信息：%s \r\n", c.retryConnSleepTime, err.Error())
+
+			// 睡眠一下，提高重连的成功率
+			time.Sleep(time.Duration(c.retryConnSleepTime) * time.Second)
+		}
+	}
+}
+
+// handleConsumerMessageTopic 路由模式的消息处理
+func (c *Consumer) handleConsumerMessageTopic() (err error) {
+	// 获取连接
+	c.conn, err = pool.ConnectionPool.GetConnection()
+	if err != nil {
+		return fmt.Errorf("获取连接异常：%s", err.Error())
+	}
+
+	// 创建channel通信信道
+	c.channel, err = c.conn.Channel()
+	if err != nil {
+		return fmt.Errorf("消费队列获取channel异常：%s", err.Error())
+	}
+
+	// 尝试创建交换机
+	err = c.channel.ExchangeDeclare(c.Exchange, "topic", true, false, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("创建交换机失败：%s", err.Error())
+	}
+
+	// 尝试创建消费队列 为了方便测试，autoDelete=true，退出后队列自动删除
+	queue, err := c.channel.QueueDeclare("", true, true, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("创建消费队列失败：%s", err.Error())
+	}
+
+	//话题模式接受消息
+	//要注意key,规则
+	//其中“*”用于匹配一个单词，“#”用于匹配多个单词（可以是零个）
+	//匹配 kuteng.* 表示匹配 kuteng.hello, kuteng.hello.one需要用kuteng.#才能匹配到
+	err = c.channel.QueueBind(queue.Name, c.Key, c.Exchange, false, nil)
+	if err != nil {
+		return fmt.Errorf("绑定队列交换机发生错误：%s", err.Error())
+	}
+
+	// 消费消息，consumer为空
+	messages, err := c.channel.Consume(queue.Name, "", false, false, false, false, nil)
+
+	fmt.Printf("正在等待消息... \r\n")
+
+	// 处理消息，会一直阻塞等待消息
+	for message := range messages {
+
+		fmt.Printf("获取到消息id=%s,content=%s \r\n", message.MessageId, message.Body)
+
+		err = c.messageHandler(message)
+		var ack bool
+		var errMsg string
+		if err != nil {
+			//消息处理失败：确认失败
+			errMsg = fmt.Sprintf("处理失败：%s", err.Error())
+			ack = false
+		} else {
+			errMsg = fmt.Sprintf("处理成功")
+			ack = true
+		}
+
+		//确认消息：成功或失败
+		err = message.Ack(ack)
+		if err != nil {
+			//消息处理成功：确认成功
+			fmt.Printf("消息id【%s】%s，确认失败：%s \r\n", message.MessageId, errMsg, err.Error())
+		} else {
+			//消息处理成功：确认成功
+			fmt.Printf("消息id【%s】%s，确认成功 \r\n", message.MessageId, errMsg)
+		}
+
+	}
+
+	//当消费队列退出后继续重连
+	return fmt.Errorf("消费队列异常退出")
+}

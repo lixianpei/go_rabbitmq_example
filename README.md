@@ -5,6 +5,9 @@
 ###### 简单调试
 - 本地搭建rabbitmq，参考文档：https://www.cnblogs.com/eddyz/p/17339961.html 推荐docker部署
 - 修改 consts.go 文件中的url配置
+- 本地调试：
+  - cd ./test 
+  - go test -run="TestSimple"
 
 ###### rabbitmq简单使用
 ![img.png](img/img_002.png)
@@ -70,18 +73,27 @@ Rabbitmq中的所有模式从顶层理解都是同一个模型，消息发送端
 - topic 主题模式(路由模式的一种)
   - exchangeName交换机名称：手动指定
   - queueName队列名称：无需指定
-  - 交换机类型：direct
+  - 交换机类型：topic
   - 星号井号代表通配符
   - 星号代表多个单词,井号代表一个单词
   - 路由功能添加模糊匹配
   - 消息产生者产生消息,把消息交给交换机
   - 交换机根据key的规则模糊匹配到对应的队列,由队列的监听消费者接收消息消费
+  - 用消息发送端定义的routingKey与所有绑定相同交换机的消费队列声明的key进行规则匹配（星号*代表多个单词,井号#代表一个单词），匹配成功消息进入对应的消息队列
   -![img_4.png](img/img_4.png)
+  - 示例：
+
+- topic模式示例
+```
+    //先启动A：  go test -run="TestTopicConsumeMessageA" key=order.#
+    //再启动B：  go test -run="TestTopicConsumeMessageB" key=order.create.*
+    //最后启动消息发送：  go test -run="TestTopicSendMessage" key=order.create.confirm  用这个key去匹配每一个绑定相同交换机的key规则，规则匹配成功，则消息推入对应的队列
+```
 
 ##### 交换机类型 exchange.kind
 - fanout【展开、广播】：把所有发送到该交换器的消息路由到所有与该交换器绑定的队列中
 - direct【直接、指定】：把消息路由到那些BindingKey和RountingKey 完全匹配的队列中
-- topic【主题、满足一定规则】:将消息路由到BindingKey和RountingKey 相匹配的队列中，匹配规则约定：
+- topic【话题模式】:将消息路由到BindingKey和RountingKey 相匹配的队列中，匹配规则约定：
 - RountingKey 和 BindingKey 均为一个点“.”分隔得字符串，被点号分隔得每一段独立的字符串称为一个单词。
 - BindingKey 中可以存在两种特殊的字符串“#”和“*”，其中“*”用于匹配一个单词，“#”用于匹配零个或者多个单词。
 - headers类型的交换器不依赖路由键的匹配规则来路由消息，而是根据发送的消息内容中的headers属性进行匹配。（不常用）

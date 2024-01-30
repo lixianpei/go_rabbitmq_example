@@ -252,3 +252,64 @@ func (p *Producer) SendMessageRouting(message string) (err error) {
 
 	return nil
 }
+
+// ================================= Topic 话题模式 ================================= //
+
+// NewProducerTopic 话题模式创建RabbitMQ实例：一个消息被多个消费者获取，消息的目标queue可用BindingKey以通配符，（#：一个或多个词，*：一个词）的方式指定
+func NewProducerTopic(exchangeName string, routeKey string) (produce *Producer, err error) {
+	// 初始化实例
+	produce = &Producer{
+		Exchange:           exchangeName,
+		Key:                routeKey,
+		retryConnSleepTime: 2,
+	}
+
+	// 获取连接
+	produce.conn, err = pool.ConnectionPool.GetConnection()
+	if err != nil {
+		return produce, fmt.Errorf("获取connection失败：%s", err.Error())
+	}
+	return produce, nil
+}
+
+// SendMessageTopic 话题模式的消息发送
+func (p *Producer) SendMessageTopic(message string) (err error) {
+	// 检测连接是否正常
+	err = p.CheckOrGetNewConnection()
+	if err != nil {
+		return err
+	}
+
+	//每次发布消息均使用新的通道
+	p.channel, err = p.conn.Channel()
+	if err != nil {
+		return fmt.Errorf("获取新的channel失败：%s", err.Error())
+	}
+	//消息发送结束关闭通道
+	defer p.CloseChannel()
+
+	//尝试创建交换机 kind=topic（不能修改）
+	err = p.channel.ExchangeDeclare(p.Exchange, "topic", true, false, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("创建交换机失败：%s", err.Error())
+	}
+
+	//发送消息
+	err = p.channel.Publish(
+		p.Exchange,
+		p.Key, // 必须设置路由key，交换机根据key的规则模糊匹配到对应的队列,由队列的监听消费者接收消息消费
+		false,
+		false,
+		amqp.Publishing{
+			DeliveryMode: amqp.Persistent, //消息持久化
+			ContentType:  "text/plain",
+			Body:         []byte(message),
+			MessageId:    uuid.New().String(),
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("发送消息给交换机失败：%s", err.Error())
+	}
+
+	return nil
+}
