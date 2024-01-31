@@ -22,7 +22,7 @@ import (
 //再启动B：  go test -run="TestTopicConsumeMessageB" key=order.create.*
 //最后启动消息发送：  go test -run="TestTopicSendMessage" key=order.create.confirm  用这个key去匹配每一个绑定相同交换机的key规则，规则匹配成功，则消息推入对应的队列
 
-const exchangeName = "exchangeOrderTopic"
+const exchangeName = "exchangeOrderTopic7"
 
 func TestTopicSendMessage(t *testing.T) {
 	//初始化连接
@@ -72,10 +72,16 @@ func topicSendMessage() {
 		fmt.Println(err.Error())
 	}
 
+	// 设置处理器处理：无法进入消息队列
+	produce.SetNotifyReturnHandler(messageNotifyReturnTopic())
+
+	// 设置处理器处理：无法进入消息队列
+	produce.SetNotifyPublishHandler(messageNotifyPublishTopic())
+
 	index := 0
 	for {
 		index++
-		msg := fmt.Sprintf("这是一条topice测试消息______%d", index)
+		msg := fmt.Sprintf("这是一条topic测试消息______%d", index)
 
 		err = produce.SendMessageTopic(msg)
 		if err != nil {
@@ -83,7 +89,7 @@ func topicSendMessage() {
 		} else {
 			fmt.Println("消息发送成功: " + msg)
 		}
-		if index >= 100 {
+		if index >= 5 {
 			break
 		}
 	}
@@ -103,6 +109,20 @@ func topicConsumeMessageB() {
 func messageHandlerTopic() consumer.MessageConsumerHandler {
 	return func(message amqp.Delivery) error {
 		fmt.Println("topic模式消息消费处理器..............", string(message.Body))
+		return nil
+	}
+}
+
+func messageNotifyReturnTopic() producer.MessageNotifyReturnHandler {
+	return func(message amqp.Return) error {
+		fmt.Println("Topic模式--处理无法被正确路由的消息：", message.MessageId)
+		return nil
+	}
+}
+
+func messageNotifyPublishTopic() producer.MessageNotifyPublishHandler {
+	return func(confirm amqp.Confirmation) error {
+		fmt.Println("Topic模式--接收消息推送到交换机的状态：", confirm.Ack, confirm.DeliveryTag)
 		return nil
 	}
 }

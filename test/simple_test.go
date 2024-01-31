@@ -22,9 +22,9 @@ func TestSimple(t *testing.T) {
 	err := pool.InitConnectionPool(rabbitmq.URL, 2)
 	fmt.Println(err)
 
-	//go startConsumer()
+	go startConsumer()
 
-	go startProducer()
+	//go startProducer()
 
 	// 阻塞进程
 	forever := make(chan bool)

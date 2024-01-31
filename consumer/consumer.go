@@ -49,11 +49,11 @@ func (c *Consumer) consumerSimpleLog(logContent string) {
 // ConsumeMessageSimpleOrWorkRun 启动simple\work模式下的消费进程
 func (c *Consumer) ConsumeMessageSimpleOrWorkRun() {
 	for {
-		c.consumerSimpleLog("开始启动消费")
+		fmt.Printf("%s 队列开始启动消费", c.QueueName)
 
 		err := c.handleConsumerMessageSimpleOrWork()
 		if err != nil {
-			c.consumerSimpleLog(fmt.Sprintf("异常退出，%d 秒后重新连接，错误信息：%s", c.retryConnSleepTime, err.Error()))
+			fmt.Printf("异常退出，%d 秒后重新连接，错误信息：%s", c.retryConnSleepTime, err.Error())
 
 			// 睡眠一下，提高重连的成功率
 			time.Sleep(time.Duration(c.retryConnSleepTime) * time.Second)
@@ -99,15 +99,15 @@ func (c *Consumer) handleConsumerMessageSimpleOrWork() (err error) {
 		nil,
 	)
 	if err != nil {
-		c.consumerSimpleLog(fmt.Sprintf("消费队列Consume异常：%s", err.Error()))
+		fmt.Printf("消费队列Consume异常：%s", err.Error())
 		return fmt.Errorf("消费队列Consume异常：%s", err.Error())
 	}
 
-	c.consumerSimpleLog(fmt.Sprintf("正在等待消息..."))
+	fmt.Printf("正在等待消息...")
 
 	// 处理消息，会一直阻塞等待消息
 	for message := range messages {
-		c.consumerSimpleLog(fmt.Sprintf("获取到消息id=%s,content=%s \r\n", message.MessageId, message.Body))
+		fmt.Printf("获取到消息id=%s,content=%s \r\n", message.MessageId, message.Body)
 		err := c.messageHandler(message)
 		var ack bool
 		var errMsg string
@@ -124,10 +124,10 @@ func (c *Consumer) handleConsumerMessageSimpleOrWork() (err error) {
 		err = message.Ack(ack)
 		if err != nil {
 			//消息处理成功：确认成功
-			c.consumerSimpleLog(fmt.Sprintf("消息id【%s】%s，确认失败：%s", message.MessageId, errMsg, err.Error()))
+			fmt.Printf("消息id【%s】%s，确认失败：%s \r\n", message.MessageId, errMsg, err.Error())
 		} else {
 			//消息处理成功：确认成功
-			c.consumerSimpleLog(fmt.Sprintf("消息id【%s】%s，确认成功", message.MessageId, errMsg))
+			fmt.Printf("消息id【%s】%s，确认成功\r\n", message.MessageId, errMsg)
 		}
 
 	}
@@ -218,7 +218,7 @@ func (c *Consumer) handleConsumerMessageSubscribe() (err error) {
 	// 消费消息，由于是发布订阅模式，consumer为空
 	messages, err := c.channel.Consume(queue.Name, "", false, false, false, false, nil)
 
-	fmt.Printf("正在等待消息... \r\n")
+	fmt.Printf("%s 消费队列正在等待消息... \r\n", c.QueueName)
 
 	// 处理消息，会一直阻塞等待消息
 	for message := range messages {
@@ -321,7 +321,7 @@ func (c *Consumer) handleConsumerMessageRouting() (err error) {
 	// 消费消息，consumer为空
 	messages, err := c.channel.Consume(queue.Name, "", false, false, false, false, nil)
 
-	fmt.Printf("正在等待消息... \r\n")
+	fmt.Printf("%s 消费队列正在等待消息... \r\n", c.QueueName)
 
 	// 处理消息，会一直阻塞等待消息
 	for message := range messages {
@@ -400,13 +400,13 @@ func (c *Consumer) handleConsumerMessageTopic() (err error) {
 	}
 
 	// 尝试创建交换机
-	err = c.channel.ExchangeDeclare(c.Exchange, "topic", true, false, false, false, nil)
+	err = c.channel.ExchangeDeclare(c.Exchange, "topic", false, false, false, false, nil)
 	if err != nil {
 		return fmt.Errorf("创建交换机失败：%s", err.Error())
 	}
 
 	// 尝试创建消费队列 为了方便测试，autoDelete=true，退出后队列自动删除
-	queue, err := c.channel.QueueDeclare("", true, true, false, false, nil)
+	queue, err := c.channel.QueueDeclare("", false, false, false, false, nil)
 	if err != nil {
 		return fmt.Errorf("创建消费队列失败：%s", err.Error())
 	}
@@ -423,7 +423,109 @@ func (c *Consumer) handleConsumerMessageTopic() (err error) {
 	// 消费消息，consumer为空
 	messages, err := c.channel.Consume(queue.Name, "", false, false, false, false, nil)
 
-	fmt.Printf("正在等待消息... \r\n")
+	fmt.Printf("%s 消费队列正在等待消息... \r\n", c.QueueName)
+
+	// 处理消息，会一直阻塞等待消息
+	for message := range messages {
+
+		fmt.Printf("获取到消息id=%s,content=%s \r\n", message.MessageId, message.Body)
+
+		err = c.messageHandler(message)
+		var ack bool
+		var errMsg string
+		if err != nil {
+			//消息处理失败：确认失败
+			errMsg = fmt.Sprintf("处理失败：%s", err.Error())
+			ack = false
+		} else {
+			errMsg = fmt.Sprintf("处理成功")
+			ack = true
+		}
+
+		//确认消息：成功或失败
+		err = message.Ack(ack)
+		if err != nil {
+			//消息处理成功：确认成功
+			fmt.Printf("消息id【%s】%s，确认失败：%s \r\n", message.MessageId, errMsg, err.Error())
+		} else {
+			//消息处理成功：确认成功
+			fmt.Printf("消息id【%s】%s，确认成功 \r\n", message.MessageId, errMsg)
+		}
+
+	}
+
+	//当消费队列退出后继续重连
+	return fmt.Errorf("消费队列异常退出")
+}
+
+// ================================= delay 延迟队列 ================================= //
+
+// NewConsumerDelay 实例化一个延迟消息消费者，通过ttl+死信交换机实现
+func NewConsumerDelay(exchangeName string, queueName string, messageHandler MessageConsumerHandler) *Consumer {
+	return &Consumer{
+		QueueName:          queueName,
+		Exchange:           exchangeName,
+		Key:                "",
+		ConsumerName:       "",
+		retryConnSleepTime: 5,
+		messageHandler:     messageHandler,
+	}
+}
+
+// ConsumeMessageDelayRun 启动延迟模式的消费者消息消费
+func (c *Consumer) ConsumeMessageDelayRun() {
+	for {
+		fmt.Printf("delay模式的交换机【%s】开始启动处理消息...\r\n", c.Exchange)
+
+		err := c.handleConsumerMessageDelay()
+		if err != nil {
+			fmt.Printf("异常退出，%d 秒后重新连接，错误信息：%s \r\n", c.retryConnSleepTime, err.Error())
+
+			// 睡眠一下，提高重连的成功率
+			time.Sleep(time.Duration(c.retryConnSleepTime) * time.Second)
+		}
+	}
+}
+
+// handleConsumerMessageDelay 处理延迟模式的消息消费
+func (c *Consumer) handleConsumerMessageDelay() (err error) {
+	// 获取连接
+	c.conn, err = pool.ConnectionPool.GetConnection()
+	if err != nil {
+		return fmt.Errorf("获取连接异常：%s", err.Error())
+	}
+
+	// 创建channel通信信道
+	c.channel, err = c.conn.Channel()
+	if err != nil {
+		return fmt.Errorf("消费队列获取channel异常：%s", err.Error())
+	}
+
+	// 死信交换机和队列名称设定
+	deadExchangeName := c.Exchange + ".dead"
+	deadQueueName := c.QueueName + ".dead"
+
+	//【消息消费者消费时只需要监听过期的队列】声明消息过期后进入的交换机、队列，并且将队列和交换机进行绑定
+	// ---------------- 死信交换机和队列声明绑定 ----------------
+	err = c.channel.ExchangeDeclare(deadExchangeName, "direct", true, false, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("DeadExchangeDeclare error：%s", err.Error())
+	}
+
+	_, err = c.channel.QueueDeclare(deadQueueName, true, false, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("DeadQueueDeclare error：%s", err.Error())
+	}
+
+	err = c.channel.QueueBind(deadQueueName, "", deadExchangeName, false, nil)
+	if err != nil {
+		return fmt.Errorf("DeadQueueBindExchange error：%s", err.Error())
+	}
+
+	// 消费消息
+	messages, err := c.channel.Consume(deadQueueName, "", false, false, false, false, nil)
+
+	fmt.Printf("%s 消费队列正在等待消息... \r\n", c.QueueName)
 
 	// 处理消息，会一直阻塞等待消息
 	for message := range messages {
